@@ -29,15 +29,15 @@ st.set_page_config(
     page_title="Integrated Supply Chain Platform",
     page_icon="🏭",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ─── Global CSS — Obsidian dark theme ────────────────────────────────────────
 st.markdown("""
 <style>
 html,body,[data-testid="stAppViewContainer"]{background:#090D16;color:#E2E8F0;font-family:'Inter',sans-serif}
-[data-testid="stSidebar"]{background:#0F172A;border-right:1px solid #1E293B}
-[data-testid="stSidebar"] *{color:#CBD5E1!important}
+[data-testid="stSidebar"]{display:none!important}
+[data-testid="collapsedControl"]{display:none!important}
 h1{color:#F8FAFC!important;font-size:1.6rem!important;font-weight:700!important}
 h2{color:#CBD5E1!important;font-size:1.15rem!important;font-weight:600!important}
 h3{color:#94A3B8!important}
@@ -62,6 +62,18 @@ label,[data-testid="stWidgetLabel"]{color:#94A3B8!important;font-size:.8rem!impo
 .agent-header{background:linear-gradient(135deg,#0F172A,#131C2E);border:1px solid #1E293B;
   border-left:4px solid #6366F1;border-radius:12px;padding:18px 24px;margin-bottom:20px}
 .step-connector{text-align:center;color:#334155;font-size:1.4rem;margin:8px 0 16px}
+/* ── Top nav tab bar styling ─────────────────────────────────────────────── */
+[data-testid="stTabs"]{background:#0F172A;border-bottom:2px solid #1E293B;
+  padding:0 8px;position:sticky;top:0;z-index:999}
+[data-testid="stTabs"] button{color:#64748B!important;font-size:.9rem!important;
+  font-weight:600!important;padding:12px 20px!important;border:none!important;
+  border-bottom:2px solid transparent!important;margin-bottom:-2px;
+  background:transparent!important;border-radius:0!important}
+[data-testid="stTabs"] button:hover{color:#E2E8F0!important;
+  border-bottom-color:#334155!important}
+[data-testid="stTabs"] button[aria-selected="true"]{color:#6366F1!important;
+  border-bottom:2px solid #6366F1!important;background:transparent!important}
+[data-testid="stTabsContent"]{padding-top:1.5rem}
 </style>""", unsafe_allow_html=True)
 
 # ─── Agent service bootstrap (register once per session) ─────────────────────
@@ -83,7 +95,12 @@ sv, svc1, svc2, svc3, svc4, svc5, svc6 = _boot_services()
 
 # ─── DB connectivity guard ────────────────────────────────────────────────────
 from core.db import ping
-if not ping():
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _cached_ping() -> bool:
+    return ping()
+
+if not _cached_ping():
     st.error("Cannot connect to MongoDB. Check MONGO_URI in your .env file.")
     st.stop()
 
@@ -122,207 +139,99 @@ def _agent_header(num: str, title: str, subtitle: str, icon: str = "") -> None:
 def _step_arrow() -> None:
     st.markdown("<div class='step-connector'>▼</div>", unsafe_allow_html=True)
 
-# ─── Sidebar navigation ───────────────────────────────────────────────────────
-st.sidebar.markdown(
-    "<div style='padding:14px 0 6px 4px'>"
-    "<span style='font-size:1.1rem;font-weight:700;color:#F8FAFC'>🏭 Supply Chain Hub</span>"
-    "<br><span style='font-size:.75rem;color:#475569'>7-Agent Integrated Platform</span>"
-    "</div>", unsafe_allow_html=True)
-st.sidebar.divider()
-
+# ─── Top navigation bar ──────────────────────────────────────────────────────
 PAGES = [
     "🔄 Procurement Pipeline",
-    "🎛️ System Control Centre",
     "🧾 Invoice Auditor",
     "⭐ Vendor Quality",
     "📊 BI Analytics",
-    "ℹ️ About",
 ]
-active_page = st.sidebar.radio("Navigate", PAGES, label_visibility="collapsed")
-st.sidebar.divider()
-st.sidebar.caption("Powered by Groq + MongoDB + LangChain")
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE: SYSTEM CONTROL CENTRE
-# ═══════════════════════════════════════════════════════════════════════════════
-if active_page == PAGES[1]:
-    st.title("🎛️ System Control Centre")
-    st.caption("Real-time Supervisor state, workflow engine, and inter-agent message log.")
-    from orchestrator.logger import get_recent_logs, get_system_health
-    health   = get_system_health()
-    s_counts = health.get("status_counts", {})
-    wf_all   = sv.get_all_workflows()
-    wf_active = sv.get_active_workflows()
-    k1,k2,k3,k4,k5 = st.columns(5)
-    k1.metric("Total Events",    health.get("total_events", 0))
-    k2.metric("Active Workflows", len(wf_active))
-    k3.metric("Total Workflows",  len(wf_all))
-    k4.metric("Successful",  s_counts.get("SUCCESS", 0))
-    k5.metric("Failed / Flagged", s_counts.get("FAILED", 0) + s_counts.get("FLAGGED", 0))
-    st.divider()
-    _section("Manual Pipeline Trigger")
-    with st.form("trigger_form"):
-        trigger_note = st.text_input("Trigger Notes", value="Manual dashboard trigger")
-        if st.form_submit_button("🚀 Trigger Full Pipeline", type="primary"):
-            wf_id = sv.trigger_pipeline(notes=trigger_note)
-            st.success(f"Pipeline triggered — workflow_id: **{wf_id}**")
-    st.divider()
-    _section("Workflow States")
-    if wf_all:
-        df_wf = pd.DataFrame([
-            {"workflow_id": w["workflow_id"], "initiated_by": w["initiated_by"],
-             "status": w["status"], "steps": len(w["steps"]),
-             "created_at": w["created_at"][:19], "updated_at": w["updated_at"][:19]}
-            for w in sorted(wf_all, key=lambda x: x["updated_at"], reverse=True)
-        ])
-        st.dataframe(df_wf, use_container_width=True, hide_index=True)
-    else:
-        st.info("No workflows recorded yet.")
-    st.divider()
-    recent_errors = health.get("recent_errors", [])
-    if recent_errors:
-        _section("Recent Errors")
-        for err in recent_errors:
-            st.error(f"**{err.get('source_agent')}** | {err.get('payload_type')} "
-                     f"| {err.get('timestamp','')[:19]} — {err.get('error','')}")
-    _section("Inter-Agent Message Log (last 150 events)")
-    log_limit = st.slider("Entries to show", 10, 150, 50, key="log_slider")
-    logs = get_recent_logs(limit=log_limit)
-    if logs:
-        df_logs = pd.DataFrame([
-            {"log_id": l.get("log_id","")[:14], "timestamp": str(l.get("timestamp",""))[:19],
-             "workflow_id": l.get("workflow_id","")[:12], "payload_type": l.get("payload_type",""),
-             "source": l.get("source_agent",""), "target": l.get("target_agent",""),
-             "status": l.get("status",""), "error": (l.get("error") or "")[:60]}
-            for l in logs
-        ])
-        st.dataframe(df_logs, use_container_width=True, hide_index=True)
-        if st.checkbox("Show full payload JSON for selected log"):
-            log_ids = [l.get("log_id","") for l in logs]
-            sel = st.selectbox("Select log_id", log_ids, key="log_sel")
-            selected_log = next((l for l in logs if l.get("log_id") == sel), None)
-            if selected_log:
-                st.json(selected_log.get("payload", {}))
-    else:
-        st.info("No log entries yet.")
+# Render tabs as a horizontal top nav
+_tabs = st.tabs(PAGES)
+active_page = None
 
+# Determine which tab is active by using tab containers
+_tab_procurement, _tab_invoice, _tab_vendor, _tab_bi = _tabs
+
+# ── Tab 0: Procurement Pipeline ───────────────────────────────────────────────
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGE: INVOICE AUDITOR (Agent 4)
-# ═══════════════════════════════════════════════════════════════════════════════
-elif active_page == PAGES[2]:
-    st.title("🧾 Agent 4 — Invoice Auditor")
+with _tab_invoice:
+    st.title("🧾 Invoice Auditor")
     st.caption(
-        "Displays all e-invoices extracted from supplier reply emails and audited by Agent 4. "
-        "The chatbot answers questions only about these invoices."
+        "Agent 4 scans supplier PDF e-invoices from MongoDB and stores extracted details here. "
+        "Use the chatbot to ask questions about any audited invoice."
     )
     from core.db import col as db_col
     from agents.invoice_auditor import get_invoice_audit_results, get_audit_chatbot_response
 
     t4a, t4b = st.tabs(["📋 Audit Results", "💬 Invoice Chatbot"])
 
-    # ── Tab A: Audit results table from invoice_audit_results ────────────────
+    # ── Tab A: Audit results table ────────────────────────────────────────────
     with t4a:
-        _section("Audited Invoices (from einvoice_store)")
+        @st.cache_data(ttl=15, show_spinner=False)
+        def _inv_counts():
+            from core.db import col as _c
+            return (
+                _c("einvoice_store").count_documents({}),
+                _c("invoice_audit_results").count_documents({}),
+                _c("einvoice_store").count_documents({"audited": False}),
+            )
 
-        # Live counts
-        total_stored   = db_col("einvoice_store").count_documents({})
-        total_audited  = db_col("invoice_audit_results").count_documents({})
-        total_pending  = db_col("einvoice_store").count_documents({"audited": False})
+        @st.cache_data(ttl=15, show_spinner=False)
+        def _inv_records():
+            from agents.invoice_auditor import get_invoice_audit_results as _giar
+            return _giar()
+
+        total_stored, total_audited, total_pending = _inv_counts()
 
         m1, m2, m3 = st.columns(3)
-        m1.metric("PDFs in MongoDB",       total_stored)
-        m2.metric("Invoices Audited",       total_audited)
-        m3.metric("Pending Audit",          total_pending)
+        m1.metric("PDFs in MongoDB",  total_stored)
+        m2.metric("Invoices Audited", total_audited)
+        m3.metric("Pending Audit",    total_pending)
 
         st.divider()
 
-        audit_records = get_invoice_audit_results()
+        audit_records = _inv_records()
         if not audit_records:
             st.info(
-                "No invoices have been audited yet. "
-                "Complete the procurement pipeline (Agents 1→2→3) to collect "
-                "e-invoices from suppliers, then trigger Agent 4."
+                "No invoices audited yet. Complete the procurement pipeline "
+                "(Agents 1 → 2 → 3) to collect e-invoices, then trigger Agent 4."
             )
         else:
-            # Summary table
             rows = []
             for r in audit_records:
                 rows.append({
-                    "Invoice #":        r.get("invoice_number", "—"),
-                    "Supplier":         r.get("supplier_name", "—"),
-                    "Email":            r.get("supplier_email", "—"),
-                    "Total (₹)":        f"₹{r.get('total_cost', 0):,.2f}",
-                    "Items":            len(r.get("items", [])),
-                    "Audit Status":     r.get("audit_status", "—"),
-                    "Discrepancies":    len(r.get("discrepancies", [])),
-                    "Passed Checks":    len(r.get("passed_checks", [])),
-                    "Audited At":       str(r.get("audited_at", ""))[:19],
-                    "Source File":      r.get("filename", "—"),
+                    "Invoice #":     r.get("invoice_number", "—"),
+                    "Supplier":      r.get("supplier_name", "—"),
+                    "Email":         r.get("supplier_email", "—"),
+                    "Total (₹)":     f"₹{r.get('total_cost', 0):,.2f}",
+                    "Items":         len(r.get("items", [])),
+                    "Audit Status":  r.get("audit_status", "—"),
+                    "Discrepancies": len(r.get("discrepancies", [])),
+                    "Passed Checks": len(r.get("passed_checks", [])),
+                    "Audited At":    str(r.get("audited_at", ""))[:19],
+                    "Source File":   r.get("filename", "—"),
                 })
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-            st.divider()
-
-            # Drill-down per invoice
-            _section("Invoice Details")
-            inv_numbers = [r.get("invoice_number", "—") for r in audit_records]
-            selected_inv = st.selectbox("Select Invoice", inv_numbers, key="a4_inv_select")
-            selected_rec = next(
-                (r for r in audit_records if r.get("invoice_number") == selected_inv), None
-            )
-            if selected_rec:
-                ic1, ic2, ic3 = st.columns(3)
-                ic1.metric("Supplier",    selected_rec.get("supplier_name", "—"))
-                ic2.metric("Total Cost",  f"₹{selected_rec.get('total_cost', 0):,.2f}")
-                ic3.metric("Status",      selected_rec.get("audit_status", "—"))
-
-                items = selected_rec.get("items", [])
-                if items:
-                    _section("Line Items")
-                    st.dataframe(pd.DataFrame(items), use_container_width=True, hide_index=True)
-
-                disc = selected_rec.get("discrepancies", [])
-                chks = selected_rec.get("passed_checks", [])
-                dc1, dc2 = st.columns(2)
-                with dc1:
-                    _section("Discrepancies")
-                    if disc:
-                        for d in disc:
-                            desc = d.get("description", str(d)) if isinstance(d, dict) else str(d)
-                            sev  = d.get("severity", "WARNING") if isinstance(d, dict) else "WARNING"
-                            if sev == "CRITICAL":
-                                st.error(f"🔴 {desc}")
-                            else:
-                                st.warning(f"🟡 {desc}")
-                    else:
-                        st.success("No discrepancies found.")
-                with dc2:
-                    _section("Passed Checks")
-                    if chks:
-                        for chk in chks:
-                            st.success(f"✅ {chk}")
-                    else:
-                        st.info("No passed checks recorded.")
-
-    # ── Tab B: Chatbot — only answers questions about invoice_audit_results ───
+    # ── Tab B: Chatbot ────────────────────────────────────────────────────────
     with t4b:
         _section("Invoice Audit Chatbot")
         st.caption(
-            "Ask questions about the audited invoices — invoice numbers, supplier details, "
-            "discrepancies, cost mismatches, etc. "
-            "This chatbot only has access to audited invoice data, nothing else."
+            "Ask anything about the audited invoices — invoice numbers, supplier details, "
+            "line items, cost breakdowns, etc. Only audited invoice data is used as context."
         )
 
         if "a4_msgs" not in st.session_state:
             st.session_state["a4_msgs"] = []
 
-        # Display conversation history
         for msg in st.session_state["a4_msgs"]:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
         user_q = st.chat_input(
-            "e.g. Which invoices were flagged? Show me all discrepancies for invoice INV-001."
+            "e.g. Which invoices were received? What is the total cost of invoice INV-001?"
         )
         if user_q:
             st.session_state["a4_msgs"].append({"role": "user", "content": user_q})
@@ -340,18 +249,25 @@ elif active_page == PAGES[2]:
                 st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGE: VENDOR QUALITY (Agent 5)
 # ═══════════════════════════════════════════════════════════════════════════════
-elif active_page == PAGES[3]:
+with _tab_vendor:
     st.title("⭐ Agent 5 — Vendor Quality Scoring")
     st.caption("Submit seller/customer feedback. Groq LLM classifies; deterministic PENALTY_TABLE scores suppliers.")
     from agents.vendor_quality import (get_all_suppliers, get_supplier_by_id,
                                        get_score_history, reprocess_all_feedback,
                                        COMPLIANCE_THRESHOLD)
-    t5a, t5b, t5c = st.tabs(["Seller Feedback", "Customer Feedback", "Supplier Dashboard"])
+    # Cache supplier list for 30s — avoid duplicate queries per render
+    @st.cache_data(ttl=30, show_spinner=False)
+    def _get_suppliers_cached():
+        from agents.vendor_quality import get_all_suppliers as _gas
+        return _gas()
+
+    _all_suppliers_cached = _get_suppliers_cached()
+
+    t5a, t5b = st.tabs(["📝 Seller Feedback", "📊 Supplier Dashboard"])
     with t5a:
         _section("Submit Seller Feedback")
-        suppliers = get_all_suppliers()
+        suppliers = _all_suppliers_cached
         if not suppliers:
             st.error("No suppliers found. Seed data first.")
         else:
@@ -384,36 +300,8 @@ elif active_page == PAGES[3]:
                     else:
                         st.success("Feedback processed.")
     with t5b:
-        _section("Submit Customer Feedback")
-        with st.form("a5_cust_form", clear_on_submit=False):
-            inv_num  = st.text_input("Invoice Number", placeholder="INV-2026-001", key="a5c_inv")
-            feedback = st.text_area("Feedback", height=120, key="a5c_fb")
-            extra    = st.text_area("Additional Details (optional)", height=80, key="a5c_ext")
-            csub     = st.form_submit_button("Submit Feedback", type="primary", use_container_width=True)
-        if csub:
-            if not inv_num.strip() or not feedback.strip():
-                st.error("Invoice number and feedback are required.")
-            else:
-                from agents.vendor_quality import resolve_supplier_from_invoice
-                sup_id = resolve_supplier_from_invoice(inv_num.strip())
-                if not sup_id:
-                    st.warning("Could not auto-resolve supplier from invoice. Check PO chain.")
-                else:
-                    sup_doc = get_supplier_by_id(sup_id) or {}
-                    st.info(f"Resolved supplier: **{sup_doc.get('supplier_name', sup_id)}** ({sup_id})")
-                    with st.spinner("Classifying & scoring…"):
-                        result = svc5.submit_feedback(
-                            source_type="CUSTOMER", supplier_id=sup_id,
-                            raw_feedback=feedback, additional_details=extra,
-                            invoice_id=inv_num.strip(),
-                        )
-                    c1,c2,c3 = st.columns(3)
-                    c1.metric("Updated Trust Score", f"{result['trust_score']:.1f} / 100")
-                    c2.metric("AI Category",  result["ai_category"])
-                    c3.metric("Score Delta",  f"{result['score_delta']:+.2f}")
-    with t5c:
         _section("All Suppliers")
-        suppliers_fresh = get_all_suppliers()
+        suppliers_fresh = _all_suppliers_cached
         if not suppliers_fresh:
             st.info("No suppliers found.")
         else:
@@ -445,9 +333,8 @@ elif active_page == PAGES[3]:
                 st.line_chart(chart_df, use_container_width=True, color="#6366F1")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGE: BI ANALYTICS (Agent 6)
 # ═══════════════════════════════════════════════════════════════════════════════
-elif active_page == PAGES[4]:
+with _tab_bi:
     st.title("📊 Agent 6 — Profit Analytics & Conversational BI")
     st.caption(
         "Type any question in plain English → Groq generates a MongoDB aggregation pipeline "
@@ -473,12 +360,19 @@ elif active_page == PAGES[4]:
         st.session_state["bi_loading"] = False
 
     # ── DB health bar ─────────────────────────────────────────────────────────
-    try:
-        inv_count   = _bi_col("sales_invoices").count_documents({})
-        prod_count  = _bi_col("products").count_documents({})
-        sup_count   = _bi_col("suppliers").count_documents({})
-    except Exception:
-        inv_count = prod_count = sup_count = 0
+    @st.cache_data(ttl=60, show_spinner=False)
+    def _bi_db_counts():
+        try:
+            from core.db import col as _c
+            return (
+                _c("sales_invoices").count_documents({}),
+                _c("products").count_documents({}),
+                _c("suppliers").count_documents({}),
+            )
+        except Exception:
+            return 0, 0, 0
+
+    inv_count, prod_count, sup_count = _bi_db_counts()
 
     db1, db2, db3 = st.columns(3)
     db1.metric("Sales Invoices in DB",  inv_count)
@@ -591,6 +485,27 @@ elif active_page == PAGES[4]:
                         f"x: `{chart_cfg.get('x_axis') or chart_cfg.get('names','')}` "
                         f"y: `{chart_cfg.get('y_axis') or chart_cfg.get('values','')}`"
                     )
+                    # ── Chart legend ──────────────────────────────────────────
+                    _ctype = chart_cfg.get("type", "bar").lower()
+                    _legend_map = {
+                        "bar":     "Bars compare discrete categories. Height = metric value.",
+                        "barh":    "Horizontal bars compare categories. Length = metric value.",
+                        "line":    "Trend over an ordered sequence or time period.",
+                        "pie":     "Each slice = share of total. All percentages sum to 100%.",
+                        "scatter": "Each dot = one record. X and Y = two numeric fields.",
+                        "heatmap": "Colour intensity = value magnitude across two dimensions.",
+                        "box":     "Box = interquartile range (25-75%). Whiskers = full spread.",
+                    }
+                    _ldesc = _legend_map.get(_ctype, "")
+                    if _ldesc:
+                        st.markdown(
+                            f"<div style='background:#0F172A;border:1px solid #1E293B;"
+                            f"border-radius:8px;padding:8px 14px;margin-top:4px;"
+                            f"font-size:.78rem;color:#94A3B8'>"
+                            f"<span style='color:#6366F1;font-weight:600'>"
+                            f"{_ctype.title()} chart:</span> {_ldesc}</div>",
+                            unsafe_allow_html=True,
+                        )
                 else:
                     st.dataframe(df_chart, use_container_width=True, hide_index=True)
 
@@ -638,47 +553,7 @@ elif active_page == PAGES[4]:
             )
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGE: ABOUT
-# ═══════════════════════════════════════════════════════════════════════════════
-elif active_page == PAGES[5]:
-    st.title("ℹ️ About — Integrated Supply Chain Platform")
-    st.markdown("""
-## Architecture: Hub-and-Spoke via Supervisor Orchestrator
-
-All agents communicate **exclusively** through the **Supervisor (Agent 7)**.
-
-```
-                ┌─────────────────────────────┐
-                │   7. SUPERVISOR ORCHESTRATOR │
-                └──────────────┬──────────────┘
-     ┌─────────┬───────────────┼───────────────┬─────────┐
-     ▼         ▼               ▼               ▼         ▼
- Agent 1    Agent 2         Agent 3         Agent 4   Agent 5
- Supply     RFQ             Quote           Invoice   Vendor
- Chain      Matcher         Evaluator       Auditor   Quality
-```
-
-## Execution Sequence (Procurement Pipeline page)
-
-| Step | Action |
-|------|--------|
-| 1 | Agent 1 runs 30-day stock simulation → demand list |
-| 2 | Agent 2 groups by category, matches DB sellers, sends all RFQ emails |
-| 3 | Agent 3 fetches replies, parses quotes, awards PO, sends confirmation asking for PDF e-invoice |
-| 4 | System polls inbox for e-invoice PDFs and auto-routes them to Agent 4 (Invoice Auditor) |
-""")
-    _section("Runtime Status")
-    from core.db import ping as _ping2
-    from core.config import settings as _s
-    c1,c2,c3 = st.columns(3)
-    c1.metric("MongoDB", "✅ Connected" if _ping2() else "❌ Unreachable")
-    c2.metric("Groq Model", _s.groq_model)
-    c3.metric("DB Name", _s.db_name)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE: PROCUREMENT PIPELINE  (main sequential flow)
-# ═══════════════════════════════════════════════════════════════════════════════
-elif active_page == PAGES[0]:
+with _tab_procurement:
     st.title("🔄 Procurement Pipeline")
     st.caption(
         "End-to-end automated flow: demand forecasting → supplier RFQ dispatch → "
@@ -756,9 +631,14 @@ elif active_page == PAGES[0]:
                 st.session_state["agent1_result"] = result
                 st.session_state["a1_proceeded"]  = False
                 # clear downstream state
-                for _stale in ["a2_dispatched","a2_all_sent","a3_results","a3_emails_sent"]:
-                    st.session_state[_stale] = [] if _stale == "a2_dispatched" else (
-                        {} if _stale == "a3_results" else False)
+                for _stale in ["a2_dispatched","a2_all_sent","a3_results","a3_emails_sent",
+                                  "a2_sup_cache"]:
+                    if _stale == "a2_dispatched":
+                        st.session_state[_stale] = []
+                    elif _stale in ("a3_results", "a2_sup_cache"):
+                        st.session_state[_stale] = {}
+                    else:
+                        st.session_state[_stale] = False
                 st.success(
                     f"✅ Simulation complete — "
                     f"**{len(result.get('needed_products',[]))} products** need restocking."
@@ -773,33 +653,6 @@ elif active_page == PAGES[0]:
         deadstock = res.get("not_selling_products", [])
 
         st.divider()
-        col_a, col_b = st.columns(2)
-
-        with col_a:
-            _section("🛒 Products Needing Restock")
-            if needed:
-                df_n = pd.DataFrame(needed)
-                if "name" in df_n.columns and "product_name" not in df_n.columns:
-                    df_n = df_n.rename(columns={"name": "product_name"})
-                show_cols = [c for c in ["product_id","product_name","category","current_stock",
-                                         "projected_30d_demand","reorder_quantity",
-                                         "estimated_reorder_cost","stockout_warning_date"]
-                             if c in df_n.columns]
-                st.dataframe(df_n[show_cols], use_container_width=True, hide_index=True)
-                st.metric("Total Procurement Cost", f"₹{df_n['estimated_reorder_cost'].sum():,.2f}")
-            else:
-                st.success("All products have sufficient stock.")
-
-        with col_b:
-            _section("⚠️ Deadstock")
-            if deadstock:
-                df_d = pd.DataFrame(deadstock)
-                if "name" in df_d.columns and "product_name" not in df_d.columns:
-                    df_d = df_d.rename(columns={"name": "product_name"})
-                st.dataframe(df_d, use_container_width=True, hide_index=True)
-                st.metric("Tied-Up Capital", f"₹{df_d['capital_tied_up'].sum():,.2f}")
-            else:
-                st.success("No deadstock identified.")
 
         # ── Interactive Demand Calendar ────────────────────────────────────────
         st.divider()
@@ -958,30 +811,38 @@ elif active_page == PAGES[0]:
                     unsafe_allow_html=True,
                 )
 
-                # ── Daily breakdown table below calendar ──────────────────────
-                with st.container():
-                    _section("Day-by-Day Detail Table")
-                    df_tl = pd.DataFrame(timeline_entry["daily_timeline"])
-                    df_tl = df_tl.rename(columns={
-                        "date":            "Date",
-                        "applied_event":   "Event",
-                        "daily_velocity":  "Velocity (units/day)",
-                        "remaining_stock": "Remaining Stock",
-                    })
-                    # Colour-code the stock column
-                    def _colour_stock(val):
-                        if val <= 0:
-                            return "background-color:#3d0f0f;color:#fca5a5"
-                        elif val <= max(5, baseline_vel * 3):
-                            return "background-color:#3d2f0a;color:#fcd34d"
-                        return ""
-                    st.dataframe(
-                        df_tl.style.applymap(_colour_stock, subset=["Remaining Stock"]),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
         else:
             st.info("Run the Agent 1 simulation first to generate product timelines for the calendar.")
+
+        # ── Restock & Deadstock tables (below calendar) ───────────────────────
+        st.divider()
+        col_a, col_b = st.columns(2)
+
+        with col_a:
+            _section("🛒 Products Needing Restock")
+            if needed:
+                df_n = pd.DataFrame(needed)
+                if "name" in df_n.columns and "product_name" not in df_n.columns:
+                    df_n = df_n.rename(columns={"name": "product_name"})
+                show_cols = [c for c in ["product_id","product_name","category","current_stock",
+                                         "projected_30d_demand","reorder_quantity",
+                                         "estimated_reorder_cost","stockout_warning_date"]
+                             if c in df_n.columns]
+                st.dataframe(df_n[show_cols], use_container_width=True, hide_index=True)
+                st.metric("Total Procurement Cost", f"₹{df_n['estimated_reorder_cost'].sum():,.2f}")
+            else:
+                st.success("All products have sufficient stock.")
+
+        with col_b:
+            _section("⚠️ Deadstock")
+            if deadstock:
+                df_d = pd.DataFrame(deadstock)
+                if "name" in df_d.columns and "product_name" not in df_d.columns:
+                    df_d = df_d.rename(columns={"name": "product_name"})
+                st.dataframe(df_d, use_container_width=True, hide_index=True)
+                st.metric("Tied-Up Capital", f"₹{df_d['capital_tied_up'].sum():,.2f}")
+            else:
+                st.success("No deadstock identified.")
 
         # ── Proceed button ────────────────────────────────────────────────────
         if needed and not st.session_state["a1_proceeded"]:
@@ -1044,17 +905,28 @@ elif active_page == PAGES[0]:
 
         all_category_data: List[Dict[str, Any]] = []
 
+        # Cache supplier lookups for Agent 2 — keyed by category, refreshed when
+        # a new simulation runs (a2_workflow_id changes).
+        _sup_cache_key = "a2_sup_cache"
+        if _sup_cache_key not in st.session_state:
+            st.session_state[_sup_cache_key] = {}
+        _sup_cache: dict = st.session_state[_sup_cache_key]
+
         for category, prods in categories.items():
-            db_suppliers = list(_db_col("suppliers").find(
-                {"categories_supplied": {"$in": [category]}, "compliance_flag": {"$ne": True}},
-                {"_id": 0}
-            ))
-            if not db_suppliers:
+            if category not in _sup_cache:
                 db_suppliers = list(_db_col("suppliers").find(
-                    {"categories_supplied": {"$elemMatch": {"$regex": f"^{category}$", "$options": "i"}},
-                     "compliance_flag": {"$ne": True}},
+                    {"categories_supplied": {"$in": [category]}, "compliance_flag": {"$ne": True}},
                     {"_id": 0}
                 ))
+                if not db_suppliers:
+                    db_suppliers = list(_db_col("suppliers").find(
+                        {"categories_supplied": {"$elemMatch": {"$regex": f"^{category}$", "$options": "i"}},
+                         "compliance_flag": {"$ne": True}},
+                        {"_id": 0}
+                    ))
+                _sup_cache[category] = db_suppliers
+            else:
+                db_suppliers = _sup_cache[category]
 
             all_category_data.append({
                 "category": category,
@@ -1200,6 +1072,8 @@ elif active_page == PAGES[0]:
     # ═══════════════════════════════════════════════════════════════════════════
 
     # ═══════════════════════════════════════════════════════════════════════════
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # ── AGENT 3 — shown after Agent 2 has dispatched ─────────────────────────
     # ═══════════════════════════════════════════════════════════════════════════
     if st.session_state.get("a2_all_sent") and st.session_state.get("a2_dispatched"):
@@ -1207,18 +1081,15 @@ elif active_page == PAGES[0]:
 
         _step_arrow()
         _agent_header("3", "Quote Evaluation & PO Awarding",
-                      "Automatically polls for supplier replies, shows live quote status per seller, "
-                      "then ranks & awards. Acceptance emails request a PDF e-invoice which is "
-                      "forwarded to the Invoice Auditor automatically.", "🏆")
+                      "Polls supplier replies, ranks quotes, awards PO, "
+                      "then collects PDF e-invoices for audit.", "🏆")
 
         sender_info = st.session_state.get("sender_info", {})
 
-        # ── Non-blocking refresh controls ─────────────────────────────────────
-        # Uses streamlit-autorefresh — NEVER calls time.sleep() which freezes UI
+        # ── Refresh controls ──────────────────────────────────────────────────
         from streamlit_autorefresh import st_autorefresh
-
-        rc1, rc2, rc3 = st.columns([3, 1, 1])
-        with rc1:
+        rf1, rf2, rf3 = st.columns([3, 1, 1])
+        with rf1:
             auto_ms = st.select_slider(
                 "⏱️ Auto-refresh interval",
                 options=[0, 15, 30, 60, 90, 120, 180, 300],
@@ -1227,26 +1098,19 @@ elif active_page == PAGES[0]:
                 key="a3_refresh_slider",
             )
             st.session_state["a3_refresh_ms"] = auto_ms
-        with rc2:
+        with rf2:
             st.write("")
-            manual_refresh = st.button("🔄 Manual Refresh", key="a3_manual_refresh")
-        with rc3:
+            manual_refresh = st.button("🔄 Refresh", key="a3_manual_refresh")
+        with rf3:
             st.write("")
             st.caption(f"🕐 {datetime.now().strftime('%H:%M:%S')}")
-
-        # Fire the non-blocking autorefresh (returns a counter, we ignore the value)
         if auto_ms > 0:
             st_autorefresh(interval=auto_ms * 1000, key="a3_autorefresh_widget")
-
         if manual_refresh:
             st.rerun()
 
         st.divider()
 
-        # ── Session-state defaults for Agent 3 ───────────────────────────────
-        # a3_fetching[cat_key]  = True  → keep polling inbox each render
-        # a3_raw_replies[cat_key] = [list of raw email dicts matched so far]
-        # a3_results[cat_key]   = {quotes, ranking, drafts, po}
         for _k2 in ["a3_fetching", "a3_raw_replies", "a3_results"]:
             if _k2 not in st.session_state:
                 st.session_state[_k2] = {}
@@ -1263,349 +1127,296 @@ elif active_page == PAGES[0]:
             sup_name_map    = {c["email"]: c["supplier_name"] for c in contacted}
             cat_key         = category.replace(" ", "_")
 
-            # Initialise per-category state
             if cat_key not in st.session_state["a3_fetching"]:
-                st.session_state["a3_fetching"][cat_key]     = True   # start polling by default
+                st.session_state["a3_fetching"][cat_key]    = True
             if cat_key not in st.session_state["a3_raw_replies"]:
-                st.session_state["a3_raw_replies"][cat_key]  = []
+                st.session_state["a3_raw_replies"][cat_key] = []
             if cat_key not in st.session_state["a3_results"]:
-                st.session_state["a3_results"][cat_key]      = None
+                st.session_state["a3_results"][cat_key]     = None
 
             currently_fetching = st.session_state["a3_fetching"][cat_key]
             cat_state          = st.session_state["a3_results"][cat_key]
 
-            # ── Background inbox poll (runs every render while fetching=True) ─
-            # This is pure Python — no sleep, no blocking. IMAP fetch is ~1-2s
-            # and happens transparently on each Streamlit rerun.
-            if currently_fetching and cat_state is None:
+            # Background inbox poll — throttled to once per 15s to avoid
+            # opening an IMAP connection on every single Streamlit rerender.
+            _imap_ts_key = f"a3_last_imap_{cat_key}"
+            _now_ts = time.time()
+            _imap_due = (_now_ts - st.session_state.get(_imap_ts_key, 0)) >= 15
+            if currently_fetching and cat_state is None and _imap_due:
+                st.session_state[_imap_ts_key] = _now_ts
                 try:
                     all_emails = fetch_recent_emails(limit=50)
                     matched_now = [
                         m for m in all_emails
                         if any(se.lower() in str(m["from"]).lower() for se in sup_emails)
                     ]
-                    # Deduplicate by (from + subject) so we don't double-count
                     existing_keys = {
-                        (r["from"], r.get("subject",""))
+                        (r["from"], r.get("subject", ""))
                         for r in st.session_state["a3_raw_replies"][cat_key]
                     }
                     for m in matched_now:
-                        key = (m["from"], m.get("subject",""))
+                        key = (m["from"], m.get("subject", ""))
                         if key not in existing_keys:
-                            st.session_state["a3_raw_replies"][cat_key].append(m)
+                            # Cap at 200 entries to prevent unbounded session state growth
+                            if len(st.session_state["a3_raw_replies"][cat_key]) < 200:
+                                st.session_state["a3_raw_replies"][cat_key].append(m)
                             existing_keys.add(key)
                 except Exception:
-                    pass  # IMAP errors are silent; next render will retry
+                    pass
 
             raw_replies = st.session_state["a3_raw_replies"][cat_key]
 
-            # ── Expander header shows live status ─────────────────────────────
             replied_emails = set()
             for m in raw_replies:
                 fa = m["from"].lower()
                 if "<" in fa:
                     fa = fa.split("<")[1].rstrip(">").strip()
                 replied_emails.add(fa)
-            n_replied = sum(1 for se in sup_emails if se.lower() in replied_emails)
-            n_total   = len(sup_emails)
-            status_icon = "✅" if n_replied == n_total and n_total > 0 else ("⏳" if currently_fetching else "⏸️")
+            n_replied   = sum(1 for se in sup_emails if se.lower() in replied_emails)
+            n_total     = len(sup_emails)
+            status_icon = "✅" if n_replied == n_total and n_total > 0 else (
+                "⏳" if currently_fetching else "⏸️")
 
-            with st.expander(
-                f"{status_icon} **{category}** — {n_replied}/{n_total} replies received",
-                expanded=True,
-            ):
-                # ── Seller details table ──────────────────────────────────────
-                _section("Sellers Contacted")
-                if contacted:
-                    rows_sup = []
-                    for c in contacted:
-                        has_replied = c["email"].lower() in replied_emails
-                        rows_sup.append({
-                            "Supplier ID":   c.get("supplier_id", ""),
-                            "Supplier Name": c["supplier_name"],
-                            "Email":         c["email"],
-                            "Category":      c.get("category", category),
-                            "Products":      ", ".join(c.get("products", [])),
-                            "Reply Status":  "✅ Replied" if has_replied else "⏳ Awaiting",
-                        })
-                    st.dataframe(pd.DataFrame(rows_sup), use_container_width=True, hide_index=True)
+            # ── Category header ───────────────────────────────────────────────
+            st.markdown(
+                f"<div class='agent-header' style='border-left-color:#6366F1'>"
+                f"<div style='font-size:.7rem;color:#6366F1;text-transform:uppercase;"
+                f"letter-spacing:.08em;font-weight:700'>{status_icon} {category}</div>"
+                f"<div style='font-size:.85rem;color:#94A3B8'>"
+                f"{n_replied}/{n_total} supplier replies received</div></div>",
+                unsafe_allow_html=True,
+            )
 
-                st.divider()
-
-                # ── Live quote receipt status ─────────────────────────────────
-                _section("Live Quote Receipt Status")
-                for c in contacted:
+            # Supplier reply status cards
+            if contacted:
+                cols_sup = st.columns(min(len(contacted), 4))
+                for ci, c in enumerate(contacted):
                     has_replied = c["email"].lower() in replied_emails
                     badge_cls   = "sv-green" if has_replied else ("sv-amber" if currently_fetching else "sv-red")
-                    badge_text  = "Quote Received" if has_replied else ("Waiting…" if currently_fetching else "Not Received")
-                    st.markdown(
-                        f"<div class='sv-card' style='display:flex;align-items:center;gap:12px'>"
-                        f"<div style='flex:1'>"
-                        f"<span style='font-weight:600;color:#E2E8F0'>{c['supplier_name']}</span>"
-                        f"<span style='font-size:.75rem;color:#64748B;margin-left:8px'>{c['email']}</span>"
-                        f"</div>"
-                        f"<span class='sv-badge {badge_cls}'>{badge_text}</span>"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
-
-                st.divider()
-
-                # ── Stop & Process / Resume controls ─────────────────────────
-                # Single button: pressing it stops polling AND immediately
-                # parses + ranks — no second click required.
-                if cat_state is None:
-                    if currently_fetching:
-                        stop_col, info_col = st.columns([1, 3])
-                        with stop_col:
-                            stop_clicked = st.button(
-                                f"⏹️ Stop & Process — {category}",
-                                key=f"a3_stop_{cat_key}",
-                                type="primary",
-                            )
-                        with info_col:
-                            if n_replied == 0:
-                                st.info(
-                                    "Polling inbox… waiting for replies. "
-                                    "Click **Stop & Process** at any time to work with "
-                                    "whatever quotes have arrived so far."
-                                )
-                            else:
-                                st.success(
-                                    f"✅ {n_replied}/{n_total} quote(s) received. "
-                                    "Click **Stop & Process** to rank and award."
-                                )
-
-                        if stop_clicked:
-                            # Mark fetching stopped immediately
-                            st.session_state["a3_fetching"][cat_key] = False
-                            # Parse & rank right now — no second button needed
-                            with st.spinner(f"Parsing {len(raw_replies)} reply(ies) via Groq LLM…"):
-                                supplier_replies = []
-                                for m in raw_replies:
-                                    fa = m["from"].lower()
-                                    if "<" in fa:
-                                        fa = fa.split("<")[1].rstrip(">").strip()
-                                    matched_email = next(
-                                        (se for se in sup_emails if se.lower() == fa), fa
-                                    )
-                                    matched_contact = next(
-                                        (c for c in contacted
-                                         if c["email"].lower() == matched_email.lower()), {}
-                                    )
-                                    supplier_replies.append({
-                                        "supplier_id":    matched_contact.get("supplier_id", matched_email),
-                                        "supplier_name":  matched_contact.get("supplier_name", matched_email),
-                                        "supplier_email": matched_email,
-                                        "email_body":     m.get("body", ""),
-                                    })
-                                if not supplier_replies:
-                                    st.warning(
-                                        "No replies to process yet. "
-                                        "Use ▶️ Resume to keep polling."
-                                    )
-                                    st.session_state["a3_fetching"][cat_key] = True
-                                else:
-                                    quotes = svc3.parse_quotes(
-                                        category, requested_items, supplier_replies
-                                    )
-                            if supplier_replies:
-                                with st.spinner("Ranking quotes via Groq LLM…"):
-                                    ranking = svc3.rank_quotes(category, quotes, requested_items)
-
-                                sq_list = [
-                                    SupplierQuote(
-                                        supplier_id       = q["supplier_id"],
-                                        supplier_email    = q["supplier_email"],
-                                        category          = category,
-                                        quoted_amount     = float(q.get("quoted_amount", 0.0)),
-                                        delivery_date     = str(q.get("delivery_date", "Unknown")),
-                                        quoted_items      = q.get("quoted_items", []),
-                                        quoted_quantities = q.get("quoted_quantities", {}),
-                                        itemized_costs    = q.get("itemized_costs", {}),
-                                    )
-                                    for q in quotes if not q.get("is_combination")
-                                ]
-                                sv.route(QuotesReceivedPayload(
-                                    workflow_id=workflow_id, category=category,
-                                    requested_items=requested_items, supplier_quotes=sq_list,
-                                ))
-                                st.session_state["a3_results"][cat_key] = {
-                                    "quotes":  quotes,
-                                    "ranking": ranking,
-                                    "drafts":  None,
-                                    "po":      None,
-                                }
-                            st.rerun()
-
-                    else:
-                        # Fetching already stopped but not yet processed
-                        # (only reachable if a previous run left fetching=False with no results)
-                        if n_replied == 0:
-                            st.warning("No replies collected yet.")
-                        else:
-                            st.info(f"Polling stopped. {n_replied} reply(ies) ready.")
-                        if st.button(f"▶️ Resume Fetching — {category}",
-                                     key=f"a3_resume_{cat_key}"):
-                            st.session_state["a3_fetching"][cat_key] = True
-                            st.rerun()
-
-                # ── Ranking, drafts & award (shown once quotes are processed) ─
-                if cat_state is not None:
-                    quotes     = cat_state["quotes"]
-                    ranking    = cat_state["ranking"]
-                    ranked_list = ranking.get("ranked_suppliers", [])
-
-                    _section("Ranking Results")
-                    if ranked_list:
-                        # Build a clean display dataframe
-                        df_rank = pd.DataFrame([{
-                            "Rank":             r["rank"],
-                            "Supplier":         r.get("supplier_name") or r["supplier_id"],
-                            "Fulfillment":      r.get("fulfillment_tier", ""),
-                            "Amount (₹)":       f"₹{r['total_quoted_amount']:,.2f}",
-                            "Trust Score":      r.get("trust_score", "—"),
-                            "Delivery":         r["delivery_date"],
-                            "Justification":    r.get("justification", ""),
-                        } for r in ranked_list])
-                        # Colour the fulfillment tier column header info
-                        st.dataframe(df_rank, use_container_width=True, hide_index=True)
-                        # Legend
+                    badge_text  = "Replied" if has_replied else ("Waiting…" if currently_fetching else "No reply")
+                    with cols_sup[ci % len(cols_sup)]:
                         st.markdown(
-                            "<div style='font-size:.72rem;color:#64748B;margin-top:4px'>"
-                            "🟢 <b>Full fulfillment</b> = single supplier covers all items &nbsp;|&nbsp; "
-                            "🟡 <b>Combo</b> = multiple suppliers combined &nbsp;|&nbsp; "
-                            "🔴 <b>Partial</b> = items missing from this supplier"
-                            "</div>",
+                            f"<div class='sv-card' style='text-align:center;padding:10px'>"
+                            f"<div style='font-size:.8rem;font-weight:600;color:#E2E8F0'>"
+                            f"{c['supplier_name']}</div>"
+                            f"<div style='font-size:.7rem;color:#475569;margin:2px 0 6px'>"
+                            f"{c['email']}</div>"
+                            f"<span class='sv-badge {badge_cls}'>{badge_text}</span>"
+                            f"</div>",
                             unsafe_allow_html=True,
                         )
-                    else:
-                        st.warning("No ranked suppliers returned.")
 
-                    if ranked_list:
-                        # Build radio options using supplier_id as key, display name as label
-                        def _winner_label(s: Dict[str, Any]) -> str:
-                            name = (
-                                s.get("supplier_name")
+            # ── Stop & Process / Resume ───────────────────────────────────────
+            if cat_state is None:
+                st.write("")
+                if currently_fetching:
+                    sc1, sc2 = st.columns([1, 3])
+                    with sc1:
+                        stop_clicked = st.button(
+                            f"⏹️ Stop & Process — {category}",
+                            key=f"a3_stop_{cat_key}", type="primary",
+                        )
+                    with sc2:
+                        if n_replied == 0:
+                            st.info("Polling inbox… Click **Stop & Process** at any time.")
+                        else:
+                            st.success(
+                                f"✅ {n_replied}/{n_total} quote(s) received — ready to process."
+                            )
+
+                    if stop_clicked:
+                        st.session_state["a3_fetching"][cat_key] = False
+                        with st.spinner(f"Parsing {len(raw_replies)} reply(ies) via Groq…"):
+                            supplier_replies = []
+                            for m in raw_replies:
+                                fa = m["from"].lower()
+                                if "<" in fa:
+                                    fa = fa.split("<")[1].rstrip(">").strip()
+                                matched_email   = next(
+                                    (se for se in sup_emails if se.lower() == fa), fa)
+                                matched_contact = next(
+                                    (c for c in contacted
+                                     if c["email"].lower() == matched_email.lower()), {})
+                                supplier_replies.append({
+                                    "supplier_id":    matched_contact.get("supplier_id", matched_email),
+                                    "supplier_name":  matched_contact.get("supplier_name", matched_email),
+                                    "supplier_email": matched_email,
+                                    "email_body":     m.get("body", ""),
+                                })
+                            if not supplier_replies:
+                                st.warning("No replies yet. Use ▶️ Resume to keep polling.")
+                                st.session_state["a3_fetching"][cat_key] = True
+                            else:
+                                quotes = svc3.parse_quotes(category, requested_items, supplier_replies)
+                        if supplier_replies:
+                            with st.spinner("Ranking quotes…"):
+                                ranking = svc3.rank_quotes(category, quotes, requested_items)
+                            sq_list = [
+                                SupplierQuote(
+                                    supplier_id=q["supplier_id"],
+                                    supplier_email=q["supplier_email"],
+                                    category=category,
+                                    quoted_amount=float(q.get("quoted_amount", 0.0)),
+                                    delivery_date=str(q.get("delivery_date", "Unknown")),
+                                    quoted_items=q.get("quoted_items", []),
+                                    quoted_quantities=q.get("quoted_quantities", {}),
+                                    itemized_costs=q.get("itemized_costs", {}),
+                                )
+                                for q in quotes if not q.get("is_combination")
+                            ]
+                            sv.route(QuotesReceivedPayload(
+                                workflow_id=workflow_id, category=category,
+                                requested_items=requested_items, supplier_quotes=sq_list,
+                            ))
+                            st.session_state["a3_results"][cat_key] = {
+                                "quotes":  quotes,
+                                "ranking": ranking,
+                                "drafts":  None,
+                                "po":      None,
+                            }
+                        st.rerun()
+                else:
+                    rc1, rc2 = st.columns([1, 3])
+                    if rc1.button(f"▶️ Resume Fetching — {category}", key=f"a3_resume_{cat_key}"):
+                        st.session_state["a3_fetching"][cat_key] = True
+                        st.rerun()
+                    rc2.warning("Polling stopped. No results yet." if n_replied == 0
+                                else f"Polling stopped. {n_replied} reply(ies) ready.")
+
+            # ── Ranking & Award ───────────────────────────────────────────────
+            if cat_state is not None:
+                quotes      = cat_state["quotes"]
+                ranking     = cat_state["ranking"]
+                ranked_list = ranking.get("ranked_suppliers", [])
+
+                st.divider()
+                _section("📊 Ranking Results")
+                if ranked_list:
+                    df_rank = pd.DataFrame([{
+                        "Rank":         r["rank"],
+                        "Supplier":     r.get("supplier_name") or r["supplier_id"],
+                        "Fulfillment":  r.get("fulfillment_tier", ""),
+                        "Amount (₹)":   f"₹{r['total_quoted_amount']:,.2f}",
+                        "Trust Score":  r.get("trust_score", "—"),
+                        "Delivery":     r["delivery_date"],
+                        "Justification": r.get("justification", ""),
+                    } for r in ranked_list])
+                    st.dataframe(df_rank, use_container_width=True, hide_index=True)
+                    st.caption(
+                        "🟢 Full fulfillment — one supplier covers all items  ·  "
+                        "🟡 Combo — multiple suppliers combined  ·  "
+                        "🔴 Partial — some items not covered"
+                    )
+                else:
+                    st.warning("No ranked suppliers returned.")
+
+                if ranked_list:
+                    def _winner_label(s: Dict[str, Any]) -> str:
+                        name = (s.get("supplier_name")
                                 or sup_name_map.get(s["supplier_id"], "")
-                                or s["supplier_id"]
-                            )
-                            return (
-                                f"Rank {s['rank']} — {name} "
-                                f"(₹{s['total_quoted_amount']:,.2f} | {s['delivery_date']})"
-                            )
+                                or s["supplier_id"])
+                        return (f"Rank {s['rank']} — {name} "
+                                f"(₹{s['total_quoted_amount']:,.2f} | {s['delivery_date']})")
 
-                        winner_id = st.radio(
-                            "Confirm winning supplier (pre-selected = LLM top rank)",
-                            [s["supplier_id"] for s in ranked_list],
-                            format_func=lambda x: _winner_label(
-                                next(s for s in ranked_list if s["supplier_id"] == x)
-                            ),
-                            key=f"winner_{cat_key}",
+                    winner_id = st.radio(
+                        "Confirm winning supplier",
+                        [s["supplier_id"] for s in ranked_list],
+                        format_func=lambda x: _winner_label(
+                            next(s for s in ranked_list if s["supplier_id"] == x)
+                        ),
+                        key=f"winner_{cat_key}",
+                    )
+
+                    # Preview drafts button
+                    if not cat_state.get("po"):
+                        if st.button(f"📝 Preview Email Drafts — {category}",
+                                     key=f"draft_{cat_key}"):
+                            with st.spinner("Generating drafts via Groq…"):
+                                winner_q = next(
+                                    (q for q in quotes if q["supplier_id"] == winner_id), None)
+                                is_combo = winner_q.get("is_combination", False) if winner_q else False
+                                drafts   = svc3.generate_draft_emails(
+                                    category, ranking, quotes, sender_info,
+                                    winner_id, is_combo_confirmation=is_combo,
+                                )
+                                cat_state["drafts"] = drafts
+                                st.session_state["a3_results"][cat_key] = cat_state
+
+                    if cat_state.get("drafts"):
+                        _section("📧 Email Drafts")
+                        for di, draft in enumerate(cat_state["drafts"]):
+                            colour = {
+                                "ACCEPTED": "sv-green", "REJECTED": "sv-red",
+                                "CONFIRMATION_REQUEST": "sv-amber",
+                            }.get(draft["status"], "sv-indigo")
+                            st.markdown(
+                                f"<div class='sv-card'>"
+                                f"<span class='sv-badge {colour}'>{draft['status']}</span>&nbsp;"
+                                f"<strong>To:</strong> {draft['to']}&nbsp;·&nbsp;"
+                                f"<strong>Subject:</strong> {draft['subject']}"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
+                            bk = f"show_body_{cat_key}_{di}"
+                            if bk not in st.session_state:
+                                st.session_state[bk] = False
+                            lbl = "▲ Hide body" if st.session_state[bk] else "▼ View body"
+                            if st.button(lbl, key=f"tog_{cat_key}_{di}"):
+                                st.session_state[bk] = not st.session_state[bk]
+                                st.rerun()
+                            if st.session_state[bk]:
+                                st.text_area("", value=draft["body"], height=160,
+                                             key=f"body_{cat_key}_{di}")
+
+                    # Award PO button
+                    if not cat_state.get("po"):
+                        st.write("")
+                        if st.button(
+                            f"✅ Award PO & Send Emails — {category}",
+                            key=f"award_{cat_key}", type="primary",
+                        ):
+                            with st.spinner("Issuing PO and dispatching emails…"):
+                                po = svc3.award_and_emit_po(
+                                    workflow_id=workflow_id, winner_id=winner_id,
+                                    sender_info=sender_info, ranking_result=ranking,
+                                    quotes=quotes,
+                                )
+                                winner_q = next(
+                                    (q for q in quotes if q["supplier_id"] == winner_id), None)
+                                is_combo = winner_q.get("is_combination", False) if winner_q else False
+                                final_drafts = svc3.generate_draft_emails(
+                                    category, ranking, quotes, sender_info,
+                                    winner_id, is_combo_confirmation=is_combo,
+                                )
+                                sent_ok = 0
+                                for d in final_drafts:
+                                    try:
+                                        svc3.send_single_email(d["to"], d["subject"], d["body"])
+                                        sent_ok += 1
+                                    except Exception as me:
+                                        st.error(f"Email to {d['to']} failed: {me}")
+                            cat_state["po"]     = po
+                            cat_state["drafts"] = final_drafts
+                            st.session_state["a3_results"][cat_key] = cat_state
+                            st.success(
+                                f"🎉 PO **{po.po_id}** → **{po.winner_supplier_id}** "
+                                f"| ₹{po.total_po_amount:,.2f} | Delivery: {po.delivery_date} "
+                                f"| {sent_ok} email(s) dispatched ✓"
+                            )
+                            st.info(
+                                "📄 Supplier was asked to reply with a GST-compliant PDF e-invoice."
+                            )
+                            st.rerun()
+                    else:
+                        po = cat_state["po"]
+                        st.success(
+                            f"✅ PO **{po.po_id}** — **{po.winner_supplier_id}** "
+                            f"| ₹{po.total_po_amount:,.2f} | Delivery: {po.delivery_date}"
                         )
 
-                        # Preview drafts
-                        if not cat_state.get("po"):
-                            if st.button(f"📝 Preview Acceptance / Rejection Drafts — {category}",
-                                         key=f"draft_{cat_key}"):
-                                with st.spinner("Generating email drafts via Groq…"):
-                                    winner_q = next(
-                                        (q for q in quotes if q["supplier_id"] == winner_id), None
-                                    )
-                                    is_combo = winner_q.get("is_combination", False) if winner_q else False
-                                    drafts = svc3.generate_draft_emails(
-                                        category, ranking, quotes, sender_info,
-                                        winner_id, is_combo_confirmation=is_combo,
-                                    )
-                                    cat_state["drafts"] = drafts
-                                    st.session_state["a3_results"][cat_key] = cat_state
+            st.divider()
 
-                        if cat_state.get("drafts"):
-                            _section("Email Drafts")
-                            for di, draft in enumerate(cat_state["drafts"]):
-                                colour = {
-                                    "ACCEPTED":             "sv-green",
-                                    "REJECTED":             "sv-red",
-                                    "CONFIRMATION_REQUEST": "sv-amber",
-                                }.get(draft["status"], "sv-indigo")
-                                # Header card
-                                st.markdown(
-                                    f"<div class='sv-card'>"
-                                    f"<span class='sv-badge {colour}'>{draft['status']}</span>&nbsp;"
-                                    f"<strong>To:</strong> {draft['to']}&nbsp;|&nbsp;"
-                                    f"<strong>Subject:</strong> {draft['subject']}"
-                                    f"</div>",
-                                    unsafe_allow_html=True,
-                                )
-                                # Toggle body visibility — avoids nested expander error
-                                body_key  = f"show_body_{cat_key}_{di}"
-                                if body_key not in st.session_state:
-                                    st.session_state[body_key] = False
-                                tog_label = "▲ Hide email body" if st.session_state[body_key] else "▼ View email body"
-                                if st.button(tog_label, key=f"tog_{cat_key}_{di}"):
-                                    st.session_state[body_key] = not st.session_state[body_key]
-                                    st.rerun()
-                                if st.session_state[body_key]:
-                                    st.text_area(
-                                        "",
-                                        value=draft["body"],
-                                        height=180,
-                                        key=f"body_{cat_key}_{di}",
-                                    )
-
-                        # Award PO & send emails
-                        if not cat_state.get("po"):
-                            if st.button(
-                                f"✅ Award PO & Send Acceptance / Rejection Emails — {category}",
-                                key=f"award_{cat_key}", type="primary",
-                            ):
-                                with st.spinner("Issuing PO and sending emails…"):
-                                    po = svc3.award_and_emit_po(
-                                        workflow_id=workflow_id, winner_id=winner_id,
-                                        sender_info=sender_info, ranking_result=ranking,
-                                        quotes=quotes,
-                                    )
-                                    winner_q = next(
-                                        (q for q in quotes if q["supplier_id"] == winner_id), None
-                                    )
-                                    is_combo = winner_q.get("is_combination", False) if winner_q else False
-                                    final_drafts = svc3.generate_draft_emails(
-                                        category, ranking, quotes, sender_info,
-                                        winner_id, is_combo_confirmation=is_combo,
-                                    )
-                                    sent_ok = 0
-                                    for d in final_drafts:
-                                        try:
-                                            svc3.send_single_email(d["to"], d["subject"], d["body"])
-                                            sent_ok += 1
-                                        except Exception as mail_err:
-                                            st.error(f"Email to {d['to']} failed: {mail_err}")
-
-                                cat_state["po"]     = po
-                                cat_state["drafts"] = final_drafts
-                                st.session_state["a3_results"][cat_key] = cat_state
-                                st.success(
-                                    f"🎉 PO **{po.po_id}** awarded to **{po.winner_supplier_id}** "
-                                    f"| ₹{po.total_po_amount:,.2f} | Delivery: {po.delivery_date} "
-                                    f"| {sent_ok} email(s) dispatched ✓"
-                                )
-                                st.info(
-                                    "📄 Acceptance email asked the supplier to reply with a "
-                                    "**GST-compliant PDF e-invoice**. Use the section below to collect it."
-                                )
-                                st.rerun()
-                        else:
-                            po = cat_state["po"]
-                            st.success(
-                                f"✅ PO **{po.po_id}** — winner: **{po.winner_supplier_id}** "
-                                f"| ₹{po.total_po_amount:,.2f} | Delivery: {po.delivery_date}"
-                            )
-
-        # ═══════════════════════════════════════════════════════════════════════
-
-        # ═══════════════════════════════════════════════════════════════════════
-        # ── E-INVOICE COLLECTION → STORE TO MONGODB → TRIGGER AGENT 4 ────────
-        # ═══════════════════════════════════════════════════════════════════════
+        # ── E-Invoice Collection → Agent 4 ────────────────────────────────────
         any_po_awarded = any(
             (st.session_state["a3_results"].get(d["category"].replace(" ", "_")) or {}).get("po")
             for d in dispatched
@@ -1618,18 +1429,16 @@ elif active_page == PAGES[0]:
                 "<div style='font-size:.7rem;color:#10B981;text-transform:uppercase;"
                 "letter-spacing:.1em;font-weight:700'>STEP 4 → AGENT 4</div>"
                 "<div style='font-size:1.25rem;font-weight:700;color:#F8FAFC;margin:4px 0 2px'>"
-                "📬 Collect & Store E-Invoice PDFs → Trigger Audit</div>"
+                "📬 Collect E-Invoice PDFs → Trigger Audit</div>"
                 "<div style='font-size:.8rem;color:#64748B'>"
-                "Polls the inbox for supplier e-invoice reply emails, stores each PDF in MongoDB, "
-                "then triggers Agent 4 to extract and audit all stored invoices."
+                "Stores supplier PDF e-invoices in MongoDB, then triggers Agent 4 to audit them."
                 "</div></div>",
                 unsafe_allow_html=True,
             )
 
-            # Collect winner emails and workflow_id for this procurement run
             winner_emails: List[str] = []
-            einv_workflow_id = st.session_state.get("a2_workflow_id",
-                f"WF-SC-{datetime.now().strftime('%Y-%m-%d')}")
+            einv_workflow_id = st.session_state.get(
+                "a2_workflow_id", f"WF-SC-{datetime.now().strftime('%Y-%m-%d')}")
             for d in dispatched:
                 cat_k = d["category"].replace(" ", "_")
                 po = (st.session_state["a3_results"].get(cat_k) or {}).get("po")
@@ -1637,25 +1446,19 @@ elif active_page == PAGES[0]:
                     winner_emails.append(po.winner_email)
 
             if winner_emails:
-                st.info(
-                    f"Watching inbox for e-invoice PDF replies from: "
-                    f"**{', '.join(winner_emails)}**"
-                )
+                st.info(f"Watching for replies from: **{', '.join(winner_emails)}**")
 
-            # ── Live stored-PDF counter ───────────────────────────────────────
             counts = svc4.get_stored_pdf_count(einv_workflow_id)
             kc1, kc2, kc3 = st.columns(3)
-            kc1.metric("PDFs in MongoDB",  counts["total"])
-            kc2.metric("Already Audited",  counts["audited"])
-            kc3.metric("Pending Audit",    counts["pending"])
+            kc1.metric("PDFs in MongoDB", counts["total"])
+            kc2.metric("Audited",         counts["audited"])
+            kc3.metric("Pending",         counts["pending"])
 
             st.divider()
+            _section("Phase 1 — Fetch & Store PDFs")
 
-            # ── Phase 1: Poll inbox and store PDFs ────────────────────────────
-            _section("Phase 1 — Fetch from inbox and store to MongoDB")
-
-            ei_c1, ei_c2, ei_c3 = st.columns([3, 1, 1])
-            with ei_c1:
+            p1c1, p1c2, p1c3 = st.columns([3, 1, 1])
+            with p1c1:
                 ei_auto_ms = st.select_slider(
                     "⏱️ Auto-fetch interval",
                     options=[0, 30, 60, 120, 180, 300],
@@ -1664,95 +1467,77 @@ elif active_page == PAGES[0]:
                     key="einv_refresh_slider",
                 )
                 st.session_state["einv_refresh_ms"] = ei_auto_ms
-            with ei_c2:
+            with p1c2:
                 st.write("")
                 fetch_store_btn = st.button(
-                    "📥 Fetch & Store PDFs", key="fetch_store_btn", type="primary"
-                )
-            with ei_c3:
+                    "📥 Fetch & Store", key="fetch_store_btn", type="primary")
+            with p1c3:
                 st.write("")
                 st.caption(f"🕐 {datetime.now().strftime('%H:%M:%S')}")
 
             if ei_auto_ms > 0:
                 st_autorefresh(interval=ei_auto_ms * 1000, key="einv_autorefresh_widget")
 
-            if fetch_store_btn or ei_auto_ms > 0:
+            _einv_ts_key = "einv_last_fetch_ts"
+            _einv_now    = time.time()
+            _einv_due    = ei_auto_ms > 0 and (_einv_now - st.session_state.get(_einv_ts_key, 0)) >= ei_auto_ms
+            if fetch_store_btn or _einv_due:
+                if _einv_due:
+                    st.session_state[_einv_ts_key] = _einv_now
                 from agents.rfq_matcher import store_einvoice_pdfs_from_inbox
-                with st.spinner("Polling inbox and storing PDFs to MongoDB…"):
+                with st.spinner("Polling inbox and storing PDFs…"):
                     store_result = store_einvoice_pdfs_from_inbox(
-                        winner_emails=winner_emails,
-                        workflow_id=einv_workflow_id,
-                        limit=50,
+                        winner_emails=winner_emails, workflow_id=einv_workflow_id, limit=50,
                     )
                 if store_result["stored"] > 0:
                     st.success(
-                        f"✅ Stored **{store_result['stored']}** new PDF(s) to MongoDB. "
-                        f"{store_result['skipped']} already existed (skipped)."
+                        f"✅ Stored **{store_result['stored']}** new PDF(s). "
+                        f"{store_result['skipped']} already existed."
                     )
                     for doc in store_result["docs"]:
                         st.caption(
-                            f"📎 **{doc['filename']}** from {doc['from_email']} "
+                            f"📎 {doc['filename']} from {doc['from_email']} "
                             f"— {doc['size_bytes']:,} bytes"
                         )
                 elif store_result["skipped"] > 0:
                     st.info(
-                        f"No new PDFs found. {store_result['skipped']} already stored "
-                        f"from a previous fetch."
-                    )
+                        f"{store_result['skipped']} PDF(s) already stored from a previous fetch.")
                 else:
-                    st.warning(
-                        "No e-invoice emails with PDF attachments found yet. "
-                        "The supplier may not have replied — try again later."
-                    )
+                    st.warning("No e-invoice emails with PDF attachments found yet.")
 
-            # ── Phase 2: Trigger Agent 4 audit ───────────────────────────────
             st.divider()
-            _section("Phase 2 — Trigger Agent 4 to audit all stored PDFs")
+            _section("Phase 2 — Trigger Agent 4 Audit")
 
             pending_count = svc4.get_stored_pdf_count(einv_workflow_id)["pending"]
-
-            if pending_count == 0 and counts["total"] == 0:
-                st.info("No PDFs stored yet. Complete Phase 1 first.")
+            if counts["total"] == 0:
+                st.info("No PDFs stored yet — complete Phase 1 first.")
             else:
                 if pending_count > 0:
-                    st.info(
-                        f"**{pending_count}** PDF(s) are stored and waiting to be audited. "
-                        "Click below to start Agent 4."
-                    )
+                    st.info(f"**{pending_count}** PDF(s) ready to audit.")
                 else:
-                    st.success("All stored PDFs have already been audited.")
+                    st.success("All stored PDFs have been audited. ✓")
 
                 if st.button(
-                    f"🚀 Trigger Agent 4 — Audit {pending_count} Stored Invoice(s)",
-                    key="trigger_audit_btn",
-                    type="primary",
+                    f"🚀 Trigger Agent 4 — Audit {pending_count} Invoice(s)",
+                    key="trigger_audit_btn", type="primary",
                     disabled=(pending_count == 0),
                 ):
-                    with st.spinner(
-                        f"Agent 4 is extracting and auditing {pending_count} invoice(s)…"
-                    ):
+                    with st.spinner(f"Auditing {pending_count} invoice(s)…"):
                         audit_trigger_result = svc4.trigger_audit(einv_workflow_id)
-
                     st.success(audit_trigger_result["message"])
-
                     for r in audit_trigger_result.get("results", []):
-                        icon = "✅" if r["audit_status"] == "PASSED" else (
-                            "❌" if r["audit_status"] == "FAILED" else "⚠️"
-                        )
+                        icon = ("✅" if r["audit_status"] == "PASSED"
+                                else "❌" if r["audit_status"] == "FAILED" else "⚠️")
                         with st.expander(
-                            f"{icon} {r['filename']} — Invoice {r['invoice_number']} "
+                            f"{icon} {r['filename']} — {r['invoice_number']} "
                             f"({r['audit_status']})"
                         ):
                             if r.get("error"):
-                                st.error(f"Processing error: {r['error']}")
+                                st.error(f"Error: {r['error']}")
                             else:
                                 ca, cb = st.columns(2)
                                 ca.metric("Discrepancies", r["discrepancies"])
                                 cb.metric("Passed Checks", r["passed_checks"])
-                                st.caption(f"Supplier: {r['from_email']}")
-
-                    st.info(
-                        "Full audit details are available on the "
-                        "**🧾 Invoice Auditor** page in the sidebar."
-                    )
+                                st.caption(f"From: {r['from_email']}")
+                    st.info("Full details available on the **🧾 Invoice Auditor** page.")
                     st.rerun()
